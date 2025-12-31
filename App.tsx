@@ -10,7 +10,8 @@ const App: React.FC = () => {
   // Toggles
   const [isLightsOff, setIsLightsOff] = useState(false);
   const [isSnowing, setIsSnowing] = useState(false);
-  const [isFrosty, setIsFrosty] = useState(false);
+  const [isFrosty, setIsFrosty] = useState(true); // Default to true (always on)
+  const [frostKey, setFrostKey] = useState(0); // Key to trigger frost reset
   
   // Interaction State (Drawing on Frost)
   const [isDrawing, setIsDrawing] = useState(false);
@@ -129,7 +130,7 @@ const App: React.FC = () => {
 
   return (
     <div 
-      className="relative w-screen h-screen bg-black overflow-hidden select-none"
+      className={`relative w-screen h-screen bg-black overflow-hidden select-none ${isFrosty ? 'cursor-pointer' : 'cursor-default'}`}
       onMouseDown={(e) => handleStart(e.clientX, e.clientY)}
       onMouseMove={(e) => handleMove(e.clientX, e.clientY)}
       onMouseUp={handleEnd}
@@ -171,12 +172,13 @@ const App: React.FC = () => {
          motionScore={motionScore}
       />
 
-      {/* Frost Overlay (Z-25) - Rendered conditionally for performance, but we keep it mounted if active to retain the drawing */}
+      {/* Frost Overlay (Z-25) - Always rendered now, controlled by key for reset */}
       {isFrosty && (
         <FrostOverlay 
           width={window.innerWidth} 
           height={window.innerHeight} 
           drawingPoint={drawingPoint}
+          resetKey={frostKey}
         />
       )}
       
@@ -185,7 +187,7 @@ const App: React.FC = () => {
         {/* Lights Toggle */}
         <button
           onClick={() => setIsLightsOff(!isLightsOff)}
-          className="bg-black/40 backdrop-blur-md text-white border border-white/20 rounded-full p-3 shadow-lg hover:bg-black/60 transition-all active:scale-95"
+          className="bg-black/40 backdrop-blur-md text-white border border-white/20 rounded-full p-3 shadow-lg hover:bg-black/60 transition-all active:scale-95 cursor-pointer"
           aria-label="Toggle Lights"
         >
           {isLightsOff ? (
@@ -198,20 +200,21 @@ const App: React.FC = () => {
         {/* Snow Toggle */}
         <button
           onClick={() => setIsSnowing(!isSnowing)}
-          className={`bg-black/40 backdrop-blur-md text-white border border-white/20 rounded-full p-3 shadow-lg hover:bg-black/60 transition-all active:scale-95 ${isSnowing ? 'bg-blue-500/30 border-blue-400' : ''}`}
+          className={`bg-black/40 backdrop-blur-md text-white border border-white/20 rounded-full p-3 shadow-lg hover:bg-black/60 transition-all active:scale-95 cursor-pointer ${isSnowing ? 'bg-blue-500/30 border-blue-400' : ''}`}
           aria-label="Toggle Snow"
         >
           <span className="text-xl">❄️</span>
         </button>
 
-        {/* Frost Toggle */}
+        {/* Frost Reset Button (Previously Toggle) */}
         <button
           onClick={() => {
-              setIsFrosty(!isFrosty);
+              // Instead of toggling off, we just reset the key to clear the screen (refill fog)
+              setFrostKey(prev => prev + 1);
               setDrawingPoint(null); // Reset drawing cursor
           }}
-          className={`bg-black/40 backdrop-blur-md text-white border border-white/20 rounded-full p-3 shadow-lg hover:bg-black/60 transition-all active:scale-95 ${isFrosty ? 'bg-cyan-100/30 border-cyan-200' : ''}`}
-          aria-label="Toggle Frost"
+          className={`bg-black/40 backdrop-blur-md text-white border border-white/20 rounded-full p-3 shadow-lg hover:bg-black/60 transition-all active:scale-95 cursor-pointer ${isFrosty ? 'bg-cyan-100/30 border-cyan-200' : ''}`}
+          aria-label="Reset Frost"
         >
           <span className="text-xl">🌫️</span>
         </button>

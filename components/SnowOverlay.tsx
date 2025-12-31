@@ -18,25 +18,15 @@ interface SnowOverlayProps {
 
 const SnowOverlay: React.FC<SnowOverlayProps> = ({ isActive, width, height, motionScore }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const accumulatedCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Removed accumulatedCanvasRef as we now render the profile dynamically
   const particlesRef = useRef<SnowParticle[]>([]);
   const heightMapRef = useRef<Float32Array | null>(null);
   const animationFrameRef = useRef<number>();
 
-  // Initialize off-screen canvas and height map
+  // Initialize height map
   useEffect(() => {
-    if (!accumulatedCanvasRef.current) {
-      accumulatedCanvasRef.current = document.createElement('canvas');
-    }
-    accumulatedCanvasRef.current.width = width;
-    accumulatedCanvasRef.current.height = height;
-
-    // Reset height map
+    // Reset height map on resize
     heightMapRef.current = new Float32Array(width).fill(0);
-    
-    // Clear accumulation on resize
-    const ctx = accumulatedCanvasRef.current.getContext('2d');
-    if (ctx) ctx.clearRect(0, 0, width, height);
   }, [width, height]);
 
   useEffect(() => {
@@ -50,10 +40,10 @@ const SnowOverlay: React.FC<SnowOverlayProps> = ({ isActive, width, height, moti
       return {
         x: Math.random() * w,
         y: startY,
-        vx: (Math.random() - 0.5) * 0.5, // Reduced wind speed slightly
-        vy: 0.4 + Math.random() * 1.2, // Significantly slower fall speed (was 1 + rand*2.5)
+        vx: (Math.random() - 0.5) * 0.5,
+        vy: 0.8 + Math.random() * 1.5, // Fall speed
         size: Math.random() * 2 + 1.5,
-        alpha: 0.8 + Math.random() * 0.2 // Brighter alpha for visibility against dark bg
+        alpha: 0.6 + Math.random() * 0.4
       };
     };
 
@@ -67,51 +57,109 @@ const SnowOverlay: React.FC<SnowOverlayProps> = ({ isActive, width, height, moti
     const update = () => {
       ctx.clearRect(0, 0, width, height);
       let shouldClearPile = false;
+      const hMap = heightMapRef.current;
 
-      // --- CHECK OVERFLOW LOGIC ---
-      // Check if any pile has reached the top (with a buffer)
-      if (heightMapRef.current) {
-          // Optimization: Check every 10th pixel to save CPU
-          for(let i=0; i<width; i+=10) {
-              if(heightMapRef.current[i] >= height - 20) {
+      if (hMap) {
+         // --- 1. PHYSICS: COMPACTION & MELTING ---
+         // Slowly reduce height over time (simulation of snow compacting or melting)
+         // This prevents infinite growth and feels more organic
+         // Only apply if there is actually snow
+         for (let i = 0; i < width; i+=4) { // Optimization: strided access
+            if (hMap[i] > 0.1) {
+                hMap[i] -= 0.02; // Very slow decay
+                if (hMap[i] < 0) hMap[i] = 0;
+            }
+         }
+
+         // --- 2. PHYSICS: SMOOTHING (AVALANCHE EFFECT) ---
+         // Increased passes for smoother, more liquid-like snow distribution
+         const threshold = 1.0; 
+         const settleAmount = 0.4;
+         const passes = 3; // More passes = smoother slopes
+
+         for(let pass=0; pass<passes; pass++) {
+            // Left to Right
+            for (let i = 1; i < width - 1; i++) {
+                const me = hMap[i];
+                const right = hMap[i+1];
+                if (me > right + threshold) {
+                    hMap[i] -= settleAmount;
+                    hMap[i+1] += settleAmount;
+                }
+            }
+            // Right to Left
+            for (let i = width - 2; i > 0; i--) {
+                const me = hMap[i];
+                const left = hMap[i-1];
+                if (me > left + threshold) {
+                    hMap[i] -= settleAmount;
+                    hMap[i-1] += settleAmount;
+                }
+            }
+         }
+
+         // --- 3. CHECK OVERFLOW ---
+         // Check if any pile has reached the top (with a buffer)
+         // Optimization: Check every 20th pixel
+         for(let i=0; i<width; i+=20) {
+              if(hMap[i] >= height - 10) {
                   shouldClearPile = true;
                   break;
               }
-          }
+         }
+
+         // --- 4. RENDER ACCUMULATED SNOW (THE SMOOTH GROUND) ---
+         // Instead of drawing circles, we draw a filled path representing the terrain.
+         ctx.beginPath();
+         ctx.moveTo(0, height); // Bottom Left
+
+         // Draw the profile
+         // Step by 2 or 3 pixels to reduce draw calls, visually identical
+         for (let x = 0; x < width; x+=2) {
+             const h = hMap[x];
+             if (h > 0.5) {
+                ctx.lineTo(x, height - h);
+             } else {
+                ctx.lineTo(x, height);
+             }
+         }
+         
+         ctx.lineTo(width, height); // Bottom Right
+         ctx.closePath();
+
+         // Gradient Fill for Volume (White top -> Blueish bottom)
+         const snowGradient = ctx.createLinearGradient(0, height - 150, 0, height);
+         snowGradient.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
+         snowGradient.addColorStop(1, 'rgba(220, 235, 255, 1)'); // Icy blue at bottom
+
+         ctx.fillStyle = snowGradient;
+         ctx.fill();
+         
+         // Optional: Top highlight line for extra crispness
+        //  ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+        //  ctx.lineWidth = 1;
+        //  ctx.stroke();
       }
 
-      // --- SHAKE / CLEAR LOGIC ---
-      // If motion score is high (user shaking) OR pile hit top
+      // --- 5. SHAKE / CLEAR LOGIC ---
       if (motionScore > 0.3 || shouldClearPile) {
-        if (accumulatedCanvasRef.current) {
-            const accCtx = accumulatedCanvasRef.current.getContext('2d');
-            accCtx?.clearRect(0, 0, width, height);
-        }
-        if (heightMapRef.current) {
-            heightMapRef.current.fill(0);
+        if (hMap) {
+            hMap.fill(0);
         }
       }
 
-      // 1. Draw Accumulated Snow (Background Layer)
-      if (accumulatedCanvasRef.current) {
-        ctx.drawImage(accumulatedCanvasRef.current, 0, 0);
-      }
-
-      if (!isActive) {
-        particlesRef.current = [];
+      // If not active, stop generating new particles but keep rendering the pile
+      if (!isActive && particlesRef.current.length === 0) {
         animationFrameRef.current = requestAnimationFrame(update);
         return;
       }
 
       // Replenish active particles
-      if (particlesRef.current.length < 400) {
+      if (isActive && particlesRef.current.length < 400) {
         particlesRef.current.push(createParticle(width, height));
       }
 
-      const accCtx = accumulatedCanvasRef.current?.getContext('2d');
-      const hMap = heightMapRef.current;
-
-      // 2. Update & Draw Falling Particles
+      // --- 6. UPDATE & DRAW FALLING PARTICLES ---
       for (let i = particlesRef.current.length - 1; i >= 0; i--) {
         const p = particlesRef.current[i];
         
@@ -123,49 +171,51 @@ const SnowOverlay: React.FC<SnowOverlayProps> = ({ isActive, width, height, moti
         if (p.x < 0) p.x = width;
         if (p.x > width) p.x = 0;
 
-        // --- COLLISION & ACCUMULATION ---
+        // --- COLLISION ---
         const pX = Math.floor(p.x);
         
-        // Check if particle hits the "ground" (defined by heightMap)
         if (hMap && pX >= 0 && pX < width) {
             const pileHeight = hMap[pX];
             const groundY = height - pileHeight;
 
-            // If particle touches the pile
-            if (p.y >= groundY - p.size) {
-                // Draw to static canvas (freeze it)
-                if (accCtx) {
-                    accCtx.fillStyle = `rgba(255, 255, 255, ${p.alpha})`; // Pure white
-                    accCtx.beginPath();
-                    accCtx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-                    accCtx.fill();
-                }
-
-                // Update Height Map (Pile up)
-                const radius = 2; // neighbor radius
+            // Collision with snowbank
+            // Note: slightly deeper penetration (groundY + 2) looks better as it blends in
+            if (p.y >= groundY + 2) {
+                // ADD TO HEIGHT MAP
+                // WIDER DISTRIBUTION for flatter, smoother piles
+                const radius = 8; 
                 for (let k = -radius; k <= radius; k++) {
                     const nx = pX + k;
                     if (nx >= 0 && nx < width) {
-                        hMap[nx] += (p.size * 0.5); 
+                        // Gaussian-ish distribution
+                        const dist = Math.abs(k);
+                        const falloff = Math.exp(- (dist * dist) / (2 * (radius/2) * (radius/2)));
+                        
+                        // Add height: p.size contributes to volume
+                        hMap[nx] += (p.size * 0.5 * falloff); 
                     }
                 }
 
-                // Recycle this particle to the top
+                // Recycle
                 Object.assign(p, createParticle(width, height));
                 continue; 
             }
         }
 
-        // Failsafe for bottom of screen
+        // Failsafe bottom
         if (p.y > height) {
            Object.assign(p, createParticle(width, height));
         }
 
-        // Draw Active Particle
-        ctx.fillStyle = `rgba(255, 255, 255, ${p.alpha})`; // Pure White
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fill();
+        // Draw Falling Particle
+        // Only draw if above the snowbank (simple z-index check)
+        const currentGroundH = (hMap && hMap[pX]) ? hMap[pX] : 0;
+        if (p.y < height - currentGroundH) {
+            ctx.fillStyle = `rgba(255, 255, 255, ${p.alpha})`; 
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            ctx.fill();
+        }
       }
 
       animationFrameRef.current = requestAnimationFrame(update);
@@ -185,7 +235,8 @@ const SnowOverlay: React.FC<SnowOverlayProps> = ({ isActive, width, height, moti
       ref={canvasRef}
       width={width}
       height={height}
-      className="absolute top-0 left-0 pointer-events-none z-20" // Higher than Dimmer (z-10)
+      className="absolute top-0 left-0 pointer-events-none z-20"
+      style={{ filter: 'blur(0.5px)' }} // Slight blur for softness
     />
   );
 };
