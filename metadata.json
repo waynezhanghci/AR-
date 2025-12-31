@@ -1,0 +1,7 @@
+{
+  "name": "AR 雾气",
+  "description": "An AR application that detects cylindrical objects (like pens or chopsticks) and attaches a virtual sparkler firework effect to the tip using Gemini Vision API.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
